@@ -3,7 +3,7 @@ OBJS:=$(patsubst %.c,%.o,$(SRCS))
 CC:=gcc
 server: $(OUT)
 server:$(OBJS)
-	$(CC) $^ -o $@ -lpthread
+	$(CC) $^ -o $@ -lpthread -lcrypt
 
 %.o:%.c
 	$(CC) -c $^ -o $@ -g

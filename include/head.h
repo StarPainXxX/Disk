@@ -24,6 +24,11 @@
 #include <sys/sendfile.h>
 #include <libgen.h>
 #include <errno.h>
+#include<crypt.h>
+#include<shadow.h>
+#include <sys/syslog.h>
+#include <stdarg.h>
+
 #define ARGS_CHECK(argc,num) {if(argc!=num){fprintf(stderr,"args error!\n");return -1;}}
 #define ERROR_CHECK(ret,num,msg) {if(ret==num){perror(msg); return -1;}}
 #define THREAD_ERROR_CHECK(ret,msg) {if(ret != 0){fprintf(stderr,"%s:%s\n",msg,strerror(ret));}}
@@ -31,11 +36,19 @@
 #define MAX_PATH_LEN 256
 #define MAX_STACK_LEN 256
 #define MAX_COMMAND_LEN 256
+#define MAX_USER_NAME 256
+#define MAX_PASSWARD 256
 #define BUFSIZE 4096
 
 #define SUCCESS 0
 #define PATH_ERROR -1
 #define PERMISSION_ERROR -2
+#define USER_ERROR -3
+#define PASSWARD_ERROR -4
+
+
+
+
 
 typedef enum{
     cd,
@@ -70,6 +83,12 @@ typedef struct{
     int length;        // locomotive
     char data[BUFSIZE];   // train car
 }train_t;
+
+typedef struct{
+    char UserName[MAX_USER_NAME];
+    char Passward[MAX_PASSWARD];
+}User;
+
 
 int stackInit(PathStack *stack);
 int stackPush(PathStack *stack, const char *path);

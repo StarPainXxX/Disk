@@ -17,7 +17,22 @@ int main(int argc, char *argv[]) {
     PathInfo pathinfo;
     PathInfoInit(&pathinfo);
     char cmdCopy[1024] = {0};
-
+    User user;
+    int code = USER_ERROR;
+    while(code != SUCCESS){
+    printf("Please enter user:\n");
+    fgets(user.UserName,sizeof(user.UserName),stdin);
+    printf("Please enter passward:\n");
+    fgets(user.Passward,sizeof(user.Passward),stdin);
+    sendTrain(sockfd,user.UserName,strlen(user.UserName));
+    sendTrain(sockfd,user.Passward,strlen(user.Passward));
+    recvResponseCode(sockfd,&code);
+    if(code == USER_ERROR){
+        printf("Unable to get user information!\n");
+    }else if(code == PASSWARD_ERROR){
+        printf("Password error!\n");
+    }
+    }
     while(1) {
         //recvFile(sockfd);
         // 读取命令

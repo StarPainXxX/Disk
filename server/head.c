@@ -7,6 +7,8 @@ int recvn(int sockfd, void *buf, long total) {
         ssize_t sret = recv(sockfd, p + cursize, total - cursize, 0);
         if (sret == 0) {
             return 1;
+        }else if(sret == -1){
+            return -1;
         }
         cursize += sret;
     }
@@ -26,7 +28,7 @@ int stackPush(PathStack *stack, const char *path){
 }
 int stackPop(PathStack *stack){
     if(stack->top == 0){
-        printf("stack is empty\n");
+        MY_LOG_ERROR("stack is empty\n");
         return -1;
     }
     stack->path[stack->top] = NULL;
@@ -73,16 +75,18 @@ int commandAnalyze(PathInfo *pathinfo){
         pathinfo->commands.type = getCommandType(cmd);
         // 获取参数（如果有的话）
         char *args = strtok(NULL, "\n");
-        printf("Command: '%s'\n", cmd);
-        printf("Arguments: '%s'\n", args ? args : "");
-        printf("Command type: %d\n", pathinfo->commands.type);
+        MY_LOG_INFO("Command: '%s'\n", cmd);
+        MY_LOG_INFO("Arguments: '%s'\n", args ? args : "");
+        MY_LOG_INFO("Command type: %d\n", pathinfo->commands.type);
 }
 
 int sendResponseCode(int netfd, int responseCode) {
     int netResponseCode = htonl(responseCode); // 转换为网络字节序
     ssize_t ret = send(netfd, &netResponseCode, sizeof(netResponseCode), 0);
     if (ret != sizeof(netResponseCode)) {
-        fprintf(stderr, "Failed to send responseCode\n");
+        MY_LOG_ERROR("Failed to send responseCode\n");
+        return 1;
+    }else if(ret == -1){
         return -1;
     }
     return 0;
@@ -91,7 +95,7 @@ int recvResponseCode(int netfd, int *responseCode) {
     int netResponseCode;
     ssize_t ret = recv(netfd, &netResponseCode, sizeof(netResponseCode), 0);
     if (ret != sizeof(netResponseCode)) {
-        fprintf(stderr, "Failed to receive responseCode\n");
+        MY_LOG_ERROR("Failed to receive responseCode\n");
         return -1;
     }
     *responseCode = ntohl(netResponseCode); // 转换为主机字节序
@@ -116,18 +120,18 @@ int recvTrain(int sockfd, train_t *train){
     // 接收长度字段
     ret = recv(sockfd, &train->length, sizeof(train->length), 0);
     if (ret <= 0 || ret != sizeof(train->length)) {
-        fprintf(stderr, "Failed to receive length\n");
+        MY_LOG_ERROR("Failed to receive length\n");
         return -1;
     }
     // 检查数据长度是否合理
     if (train->length > BUFSIZE) {
-        fprintf(stderr, "Path length exceeds size\n");
+        MY_LOG_ERROR("Recv length exceeds size\n");
         return -1;
     }
     // 接收数据字段
     ret = recv(sockfd, train->data, train->length, 0);
     if (ret <= 0 || ret != train->length) {
-        fprintf(stderr, "Failed to receive data\n");
+        MY_LOG_ERROR("Failed to receive data\n");
         return -1;
     }
     return 0;  // 成功

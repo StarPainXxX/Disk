@@ -1,7 +1,7 @@
 #ifndef __WORKER__
 #define __WORKER__
 #include "../include/head.h"
-
+#include "log.h"
 typedef struct tidArr_s{
     pthread_t *arr;
     int workerNum;
@@ -19,4 +19,5 @@ int rmCommand(PathInfo *pathinfo, int netfd);
 int mkCommand(PathInfo *pathinfo, int netfd);
 void deserialize(char *buffer, size_t total_size, char ***data, size_t *count);
 int recvFile(int sockfd);
+int checkEnter(User user);
 #endif

@@ -1,6 +1,7 @@
 #include "../include/head.h"
 #define ROOTPATH "Disk/User1"
 
+
 int stackInit(PathStack *stack){
     stack->capacity = MAX_STACK_LEN;
     stack->top = 0;
@@ -183,8 +184,57 @@ void list_directory(const char *path) {
 
     closedir(dir); // 关闭目录流
 }
+#include<crypt.h>
+#include<shadow.h>
+#define MAX_USER_NAME 256
+#define MAX_PASSWARD 256
+
+
+typedef struct{
+    char UserName[MAX_USER_NAME];
+    char Passward[MAX_PASSWARD];
+}User;
+
+int checkEnter(User user){
+    user.UserName[strcspn(user.UserName,"\n")] = 0;
+    if(strlen(user.UserName) == 0){
+        printf("Username is empty!\n");
+        return -1;
+    }
+    printf("username = %s\n",user.UserName);
+    struct spwd *pinfo = getspnam(user.UserName);
+
+    if(pinfo == NULL){
+        printf("Get user fail!\n");
+        return -1;
+    }
+    user.Passward[strcspn(user.Passward, "\n")] = 0;
+
+    char salt[50];
+    printf("entry = %s\n",pinfo->sp_pwdp);
+    sscanf(pinfo->sp_pwdp, "$%*[^$]$%[^$]", salt);
+    printf("盐值: %s\n", salt);
+
+    char *encrypted_input = crypt(user.Passward, pinfo->sp_pwdp);
+    
+    if(encrypted_input == NULL){
+        printf("Encryption failed!\n");
+        return -1;
+    }
+    if(strcmp(encrypted_input, pinfo->sp_pwdp) == 0){
+        printf("Successful!\n");
+        return 0;
+    } else {
+        printf("Password incorrect!\n");
+        return -1;
+    }
+};
 int main() {
-    const char *directory = "../test"; // 指定目录
-    list_directory(directory); // 列出目录内容
+    User user;
+    printf("请输入账号:\n");
+    fgets(user.UserName,sizeof(user.UserName),stdin);
+    printf("请输入密码:\n");
+    fgets(user.Passward,sizeof(user.Passward),stdin);
+    checkEnter(user);
     return 0;
 }

@@ -3,7 +3,7 @@ EXES:=$(patsubst %.c,%,$(SRCS))
 CC:=gcc
 all:$(EXES)
 %:%.c
-	$(CC) $^ -o $@ -g -lpthread
+	$(CC) $^ -o $@ -g -lpthread -lcrypt
 .PHONY:clean rebuild
 clean:
 	$(RM) $(EXES) 
