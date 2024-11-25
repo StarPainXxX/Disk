@@ -15,6 +15,7 @@ int main(int argc, char *argv[]) {
     ERROR_CHECK(ret, -1, "connect");
     
     User user;
+    system("clear");
     printf("-----------------------------\n");
     printf("Hi,there! Nice to meet you!\n");
     printf("Welcome to use!\n");

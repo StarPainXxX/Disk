@@ -182,25 +182,25 @@ int pathInit(User *user,MYSQL *mysql){
     return 0;
 }
 
-int check_dir(User *user, const char *path,int top,MYSQL *mysql){
+int check_dir(int userId, const char *path,int parent_id,MYSQL *mysql){
     MYSQL_RES *res;
     MYSQL_ROW row;
     char query[MAX_SQL_LEN];
-    snprintf(query,MAX_SQL_LEN,"select id from file where owner_id = %d and filename = '%s' and parent_id = %d;",
-                                user->UserId,path,top+1);
+    snprintf(query,MAX_SQL_LEN,"select id from file where owner_id = %d and filename = '%s' and parent_id = %d and type = %d;",
+                                userId,path,parent_id,0);
     if(mysql_query(mysql,query) != 0){
         MY_LOG_ERROR("%s\n",mysql_error(mysql));
-        return 1;
+        return -2;
     }
     res = mysql_store_result(mysql);
     if(res == NULL){
         MY_LOG_ERROR("%s\n",mysql_error(mysql));
-        return 1;
+        return -2;
     }
     row = mysql_fetch_row(res);
     if(row == NULL){
         mysql_free_result(res);
-        return 1;
+        return -2;
     }else{
         mysql_free_result(res);
         return atoi(row[0]);
@@ -215,8 +215,8 @@ int first_dir_init(User *user,MYSQL *mysql){
     int dir_id = -1;
     char path[256] = "/";
     strcat(path,user->UserName);
-    snprintf(query,MAX_SQL_LEN,"insert into file (parent_id,filename,owner_id,type) values (%d,'%s',%d,%d);",
-                                0,path,user->UserId,0);
+    snprintf(query,MAX_SQL_LEN,"insert into file (parent_id,filename,owner_id,type,path) values (%d,'%s',%d,%d,'%s');",
+                                0,path,user->UserId,0,path);
     
     if(mysql_query(mysql,query) != 0){
         printf("%s\n",mysql_error(mysql));
@@ -232,13 +232,46 @@ int first_dir_init(User *user,MYSQL *mysql){
     return dir_id;
 }
 
-int ls_dir(User *user,char *path,MYSQL *mysql){
+int get_root_id(User *user,MYSQL *mysql){
     MYSQL_RES *res;
     MYSQL_ROW row;
     char query[MAX_SQL_LEN];
+    char name[256] = "/";
+    strcat(name,user->UserName);
+
     snprintf(query,MAX_SQL_LEN,
-            "select filename from file where owner_id = %d and parent_id = %d",
-            user->UserId,user->pathinfo.stack.top + 1);
+            "select id from file where parent_id = %d and path = '%s';",
+            0,name);
+    if(mysql_query(mysql,query) != 0){
+        printf("%s\n",mysql_error(mysql));
+        return 1;
+    }
+
+    res = mysql_store_result(mysql);
+    if (res == NULL){
+        MY_LOG_ERROR("mysql_store_result failed: %s\n",mysql_error(mysql));
+        return 1;
+    }
+
+    row = mysql_fetch_row(res);
+    if(row == NULL){
+        MY_LOG_ERROR("Path not exists");
+        mysql_free_result(res);
+        return 1;
+    }
+
+    mysql_free_result(res);
+    return atoi(row[0]);
+}
+
+int ls_dir(User *user,char *path,int parent_id,MYSQL *mysql){
+    MYSQL_RES *res;
+    MYSQL_ROW row;
+    memset(path,0,sizeof(path));
+    char query[MAX_SQL_LEN];
+    snprintf(query,MAX_SQL_LEN,
+            "select filename from file where owner_id = %d and parent_id = %d and type = %d",
+            user->UserId,parent_id,0);
 
     if(mysql_query(mysql,query) != 0){
         MY_LOG_ERROR("%s\n",mysql_error(mysql));
@@ -259,7 +292,157 @@ int ls_dir(User *user,char *path,MYSQL *mysql){
         strcat(path,row[0]);
         is_first = 0;
     }
+    snprintf(query,MAX_SQL_LEN,
+            "select path from file where owner_id = %d and parent_id = %d and type = %d",
+            user->UserId,parent_id,1);
+    
+    if(mysql_query(mysql,query) != 0){
+        MY_LOG_ERROR("%s\n",mysql_error(mysql));
+        return 1;
+    }
+
+    res = mysql_store_result(mysql);
+    if (res == NULL){
+        MY_LOG_ERROR("mysql_store_result failed: %s\n",mysql_error(mysql));
+        return 1;
+    }
+    int nums_rows = mysql_num_rows(res);
+    while((row = mysql_fetch_row(res))){
+        strcat(path," ");
+        char *lastSlash = strrchr(row[0],'/');
+        strcat(path,lastSlash+1);
+    }
 
     mysql_free_result(res);
-    return num_rows;
+    MY_LOG_DEBUG("%d",num_rows + nums_rows);
+    return num_rows + nums_rows;
 }
+
+int create_dir(int userId,PathStack *stack,char *name,int parent_id,MYSQL *mysql){
+    MYSQL_RES *res;
+    MYSQL_ROW row;
+    MY_LOG_DEBUG("name = %s",name);
+    char query[MAX_SQL_LEN];
+    snprintf(query,MAX_SQL_LEN,
+            "select count(*) from file where owner_id = %d and parent_id = %d and filename = '%s' and type = %d",
+            userId,parent_id,name,0);
+     if(mysql_query(mysql,query) != 0){
+        MY_LOG_ERROR("%s\n",mysql_error(mysql));
+        return 1;
+    }
+
+    res = mysql_store_result(mysql);
+    if (res == NULL){
+        mysql_free_result(res);
+        MY_LOG_ERROR("mysql_store_result failed: %s\n",mysql_error(mysql));
+        return 1;
+    }
+    row = mysql_fetch_row(res);
+
+    int num = atoi(row[0]);
+    MY_LOG_INFO("%d",num);
+    if(num > 0 ){
+        mysql_free_result(res);
+        MY_LOG_ERROR("Dir already exists");
+        return 0;
+    }
+    char stack_path[256] = {0};
+    for(int i = 0; i <= stack->top;i++){
+        strcat(stack_path,stack->path[i]);
+    }
+    snprintf(query,MAX_SQL_LEN,
+            "insert into file (parent_id,filename,owner_id,type,path) values (%d,'%s',%d,%d,'%s')",
+            parent_id,name,userId,0,stack_path);
+    
+    if(mysql_query(mysql,query) != 0){
+        printf("%s\n",mysql_error(mysql));
+        return 1;
+    }
+
+    int dir_id = mysql_insert_id(mysql);
+    if (dir_id == 0) {
+        mysql_free_result(res);
+        MY_LOG_ERROR("Failed to retrieve the last inserted ID.\n");
+        return 1;
+    }
+
+    return dir_id;
+}
+
+int get_dir_id(const char *path,int userId,MYSQL *mysql){
+    MYSQL_RES *res;
+    MYSQL_ROW row;
+    
+    char query[MAX_SQL_LEN];
+    snprintf(query,MAX_SQL_LEN,
+            "select id from file where owner_id = %d and path = '%s' and type = %d;",
+            userId,path,0);
+
+    if(mysql_query(mysql,query) != 0){
+        MY_LOG_ERROR("%s\n",mysql_error(mysql));
+        return -2;
+    }
+
+    res = mysql_store_result(mysql);
+    if(res == NULL){
+        MY_LOG_ERROR("mysql_store_resul failed: %s",mysql_errno(mysql));
+        return -2;
+    }
+
+    row = mysql_fetch_row(res);
+    if(row == NULL){
+        MY_LOG_ERROR("Path not exists");
+        mysql_free_result(res);
+        return -2;
+    }
+
+    mysql_free_result(res);
+    return atoi(row[0]);
+}
+
+int rm_dir(char *path,User *user,MYSQL *mysql){
+    int id = get_dir_id(path,user->UserId,mysql);
+    MY_LOG_DEBUG("id = %d",id);
+    MYSQL_RES *res;
+    MYSQL_ROW row;
+    char query[MAX_SQL_LEN];
+    snprintf(query,MAX_SQL_LEN,
+            "select type from file where id = %d;",
+            id);
+    if(mysql_query(mysql,query) != 0){
+        MY_LOG_ERROR("%s\n",mysql_error(mysql));
+        return 1;
+    }
+
+    res = mysql_store_result(mysql);
+    if(res == NULL){
+        MY_LOG_ERROR("mysql_store_resul failed: %s",mysql_errno(mysql));
+        return 1;
+    }
+    row = mysql_fetch_row(res);
+    int type = atoi(row[0]);
+
+    snprintf(query,MAX_SQL_LEN,
+            "delete from file where id = %d;",
+            id);
+    
+    MY_LOG_DEBUG("type = %d",type);
+    if(type == 1){
+        if(mysql_query(mysql,query) != 0){
+            MY_LOG_ERROR("%s\n",mysql_error(mysql));
+            return 1;
+        }
+        return 0;
+    }else{
+        int ld_ret = ls_dir(user,path,id,mysql);
+        if(ld_ret != 0){
+            return -2;
+        }
+        if(mysql_query(mysql,query) != 0){
+            MY_LOG_ERROR("%s\n",mysql_error(mysql));
+            return 1;
+        }
+        return 0;
+    }
+}
+

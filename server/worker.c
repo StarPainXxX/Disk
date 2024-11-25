@@ -294,7 +294,6 @@ int cdCommand(int netfd, User *user, char *args, MYSQL *mysql) {
     }
     while (*cmd == ' ') cmd++;
     
-    MY_LOG_DEBUG("user top %d",user->pathinfo.stack.top);
     PathStack stack;
     stackInit(&stack);
     for(int i = 0; i <= user->pathinfo.stack.top; i++) {
@@ -304,7 +303,8 @@ int cdCommand(int netfd, User *user, char *args, MYSQL *mysql) {
     
     while(cmd != NULL) {
         MY_LOG_DEBUG("Processing path component: '%s'", cmd);
-        
+        char path[256] = "/";
+        strcat(path,cmd); 
         if(strcmp(cmd, "..") == 0) {
             if(stack.top > 0){
                 stackPop(&stack);
@@ -316,20 +316,24 @@ int cdCommand(int netfd, User *user, char *args, MYSQL *mysql) {
             }
             char newPath[MAX_PATH_LEN] = {0};
             for(int i = 0; i <= stack.top; i++) {
-                strcat(newPath, "/");
                 strcat(newPath, stack.path[i]);
-                
             }
             memcpy(user->pathinfo.curPath, newPath, sizeof(newPath));
         } else {
-            int dir_id = check_dir(user, cmd, stack.top, mysql);
+            char stack_path[256] = {0};
+            for(int i = 0; i <= stack.top;i++){
+                strcat(stack_path,stack.path[i]);
+            }
+            strcat(stack_path,path);
+            MY_LOG_DEBUG("stack_path = %s",stack_path);
+            int dir_id = get_dir_id(stack_path,user->UserId,mysql);
             if(dir_id == 1) {
                 MY_LOG_ERROR("Path not exist: '%s'", cmd);
                 responseCode = PATH_NOT_EXIST;
                 sendResponseCode(netfd, responseCode);
                 return 1;
             } else {
-                stackPush(&stack, cmd);
+                stackPush(&stack, path);
                 strcat(user->pathinfo.curPath, "/");
                 strcat(user->pathinfo.curPath, cmd);
             }
@@ -356,7 +360,14 @@ int lsCommand(int netfd,User *user,MYSQL *mysql){
     train_t train;
     int responseCode = SUCCESS;
     char path[MAX_LS_LEN] = {0};
-    int ls_ret = ls_dir(user,path,mysql);
+    char stack_path[256] = {0};
+    MY_LOG_DEBUG("stack_path = %s",user->pathinfo.stack.path[0]);
+    for(int i = 0; i <= user->pathinfo.stack.top; i++){
+        strcat(stack_path,user->pathinfo.stack.path[i]);
+        
+    }
+    int parent_id = get_dir_id(stack_path,user->UserId,mysql);
+    int ls_ret = ls_dir(user,path,parent_id,mysql);
     MY_LOG_DEBUG("path = %s",path);
     if(ls_ret == 0){
         responseCode = PATH_ERROR;
@@ -370,6 +381,152 @@ int lsCommand(int netfd,User *user,MYSQL *mysql){
     ERROR_CHECK(st_ret,-1,"send path error");
     MY_LOG_INFO("Ls successful");
     return 0;
+}
+
+int pwdCommand(int netfd,User *user){
+    char path[256] = {0};
+    
+    if(user->pathinfo.stack.top == 0){
+        strcat(path, "/");
+    }else{
+        for(int i = 1; i <= user->pathinfo.stack.top; i++){
+            strcat(path,user->pathinfo.stack.path[i]);
+        }
+    }
+    MY_LOG_INFO("path = %s",path);
+    int st_ret = sendTrain(netfd,path,strlen(path));
+    ERROR_CHECK(st_ret,-1,"send path error");
+    MY_LOG_INFO("Pwd successful");
+    return 0;
+}
+
+int mkCommand(int netfd,User *user,char *args,MYSQL *mysql){
+    train_t train;
+    int responseCode = SUCCESS;
+    int top = 0;
+    char cmdCopy[1024] = {0};
+    strncpy(cmdCopy, args, sizeof(cmdCopy) - 1);
+    char *cmd = strtok(cmdCopy, " /");
+    cmd = strtok(NULL, " /");
+    while (*cmd == ' ') cmd++;
+    PathStack stack;
+    stackInit(&stack);
+    for(int i = 0; i <= user->pathinfo.stack.top; i++){
+        stackPush(&stack, user->pathinfo.stack.path[i]);
+    }
+    while(cmd != NULL) {
+        char path[256] = "/";
+        strcat(path,cmd); 
+        MY_LOG_DEBUG("Processing path component: '%s'", cmd);
+        
+        if(strcmp(cmd, "..") == 0) {
+            if(stack.top > 0){
+                stackPop(&stack);
+            }else{
+                MY_LOG_ERROR("Path not exist");
+                responseCode = PATH_NOT_EXIST;
+                sendResponseCode(netfd, responseCode);
+                return 1;
+            }
+        } else {
+            
+            stackPush(&stack,path);
+        }
+        cmd = strtok(NULL, " /");
+    }
+
+    if(stack.top == 0){
+        return 0;
+    }
+    char stack_path[256] = {0};
+    int parent_id;
+    if(stack.top != 1){
+        for(int i = 0; i < stack.top; i++){
+            strcat(stack_path,stack.path[i]);
+        }
+        parent_id = get_dir_id(stack_path,user->UserId,mysql);
+        MY_LOG_INFO("%d",parent_id);
+        
+        if(parent_id == 0){
+            MY_LOG_ERROR("Path not exist: '%s'", stack_path);
+            responseCode = PATH_NOT_EXIST;
+            sendResponseCode(netfd, responseCode);
+            return 1;
+        }
+    }else{
+        parent_id = get_root_id(user,mysql);
+        MY_LOG_INFO("%d",parent_id);
+    }
+    MY_LOG_INFO("%d",parent_id);
+    char *lastSlash = strrchr(stack.path[stack.top],'/');
+    char *name = lastSlash+1;
+    MY_LOG_DEBUG("name = %s",stack.path[stack.top]);
+    MY_LOG_DEBUG("name = %s",name);
+    int cd_ret = create_dir(user->UserId,&stack,name,parent_id,mysql);
+    if(cd_ret == 0){
+        responseCode = PATH_EXIST;
+        int sr_ret = sendResponseCode(netfd,responseCode);
+        ERROR_CHECK(sr_ret,-1,"send code error");
+    }
+    responseCode = SUCCESS;
+    int sr_ret = sendResponseCode(netfd,responseCode);
+    ERROR_CHECK(sr_ret,-1,"send code error");
+    MY_LOG_INFO("Mk successful");
+}
+int rmCommand(int netfd,User *user,char *args,MYSQL *mysql){
+    train_t train;
+    int responseCode = SUCCESS;
+    int top = 0;
+    char cmdCopy[1024] = {0};
+    strncpy(cmdCopy, args, sizeof(cmdCopy) - 1);
+    char *cmd = strtok(cmdCopy, " /");
+    cmd = strtok(NULL, " /");
+    while (*cmd == ' ') cmd++;
+    PathStack stack;
+    stackInit(&stack);
+    for(int i = 0; i <= user->pathinfo.stack.top; i++){
+        stackPush(&stack, user->pathinfo.stack.path[i]);
+    }
+    while(cmd != NULL) {
+        char path[256] = "/";
+        strcat(path,cmd); 
+        MY_LOG_DEBUG("Processing path component: '%s'", cmd);
+        
+        if(strcmp(cmd, "..") == 0) {
+            if(stack.top > 0){
+                stackPop(&stack);
+            }else{
+                MY_LOG_ERROR("Path not exist");
+                responseCode = PATH_NOT_EXIST;
+                sendResponseCode(netfd, responseCode);
+                return 1;
+            }
+        } else {
+            
+            stackPush(&stack,path);
+        }
+        cmd = strtok(NULL, " /");
+    }
+
+    if(stack.top == 0){
+        return 0;
+    }
+    char path[256] = {0};
+    for(int i = 0; i <= stack.top; i++){
+        strcat(path,stack.path[i]);
+    }
+    int rd_ret = rm_dir(path,user,mysql);
+    if(rd_ret == -2){
+        responseCode == PATH_ERROR;
+        int sr_ret = sendResponseCode(netfd,responseCode);
+        ERROR_CHECK(sr_ret,-1,"send code error");
+        MY_LOG_ERROR("The floder is not empty");
+        return 0;
+    }
+    responseCode == SUCCESS;
+    int sr_ret = sendResponseCode(netfd,responseCode);
+    ERROR_CHECK(sr_ret,-1,"send code error");
+    MY_LOG_INFO("Rm successful");
 }
 
 int clientCommand(int netfd, User *user,MYSQL *mysql){
@@ -407,35 +564,35 @@ int clientCommand(int netfd, User *user,MYSQL *mysql){
             break;
         case pwd:
             MY_LOG_INFO("Executing PWD command, User: %d",user->UserId);
-            if(-1){
+            if( pwdCommand(netfd,user) == -1){
                 MY_LOG_ERROR("Client %s disconnection!\n",user->UserId);
                 return -1;
             }
             break;
         case put:
-            MY_LOG_INFO("Executing PUT command, User: %s",user->UserId);
-            if(-1){
+            MY_LOG_INFO("Executing PUT command, User: %d",user->UserId);
+            if( mkCommand(netfd,user,commands.args,mysql) == -1){
                 MY_LOG_ERROR("Client %s disconnection!\n",user->UserId);
                 return -1;
             }
             break;
         case get:
-            MY_LOG_INFO("Executing GET command, User: %s",user->UserId);
+            MY_LOG_INFO("Executing GET command, User: %d",user->UserId);
             if(-1){
                 MY_LOG_ERROR("Client %s disconnection!\n",user->UserId);
                 return -1;
             }
             break;
         case rm:
-            MY_LOG_INFO("Executing RM command, User: %s",user->UserId);
-            if(-1){
+            MY_LOG_INFO("Executing RM command, User: %d",user->UserId);
+            if(rmCommand(netfd,user,commands.args,mysql) == -1){
                 MY_LOG_ERROR("Client %s disconnection!\n",user->UserId);
                 return -1;
             }
             break;
         case mk:
             MY_LOG_INFO("Executing MK command, User: %d",user->UserId);
-            if(-1){
+            if(mkCommand(netfd,user,commands.args,mysql) == -1){
                 MY_LOG_ERROR("Client %d disconnection!\n",user->UserId);
                 return -1;
             }

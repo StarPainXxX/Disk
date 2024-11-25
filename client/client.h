@@ -3,6 +3,7 @@
 
 #include "../include/head.h"
 #include "factory.h"
+#include <ncurses.h>
 
 #define PROGRESS_WIDTH 50 
 

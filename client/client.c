@@ -338,22 +338,47 @@ int fileCommand(int sockfd){
     case cd:
         recvResponseCode(sockfd,&responseCode);
         if(responseCode == PATH_ERROR){
-            printf("Have in root!\n");
+            printf("Unable to go past the root directory!\n");
         }else if(responseCode == PATH_NOT_EXIST){
             printf("Path not exist\n");
         }
         break;
     case ls:
+        memset(&train,0,sizeof(train));
+        
         recvResponseCode(sockfd,&responseCode);
         if(responseCode == PATH_ERROR){
             printf("Folder is empty!\n");
         }else{
-            char path[MAX_LS_LEN];
+            char path[MAX_LS_LEN] = {0};
             recvTrain(sockfd,&train);
             memcpy(path,train.data,train.length);
             printf("%s\n",path);
         }
-
+        break;
+    case pwd:
+        char path[MAX_PATH_LEN] = {0};
+        recvTrain(sockfd,&train);
+        memcpy(path,train.data,train.length);
+        printf("%s\n",path);
+        break;
+    case mk:
+        recvResponseCode(sockfd,&responseCode);
+        if(responseCode == PATH_NOT_EXIST){
+            printf("Please enter a valid path!\n");
+        }else if(responseCode == PATH_EXIST){
+            printf("Folder already exists!\n");
+        }else{
+            printf("Created successfully!\n");
+        }
+        break;
+    case rm:
+        recvResponseCode(sockfd,&responseCode);
+        if(responseCode == SUCCESS){
+            printf("Remove file successfully!\n");
+        }else{
+            printf("The floder is not empty!\n");
+        }
         break;
     case -1:
         printf("Invalid command!\n");

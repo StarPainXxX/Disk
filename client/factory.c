@@ -16,9 +16,25 @@ int user_command(int sockfd, User *user){
         sendResponseCode(sockfd,responseCode);
         int li_ret = log_in_command(sockfd,user);
         if(li_ret == 0){
+            system("clear");
+            printf("Password error, please try again!\n");
+            sleep(1);
+            system("clear");
             return 0;
         }else if(li_ret == 1){
+            system("clear");
+            printf("Log in successfully, Enjoy!\n");
             return 1;
+        }else if(li_ret == -1){
+            system("clear");
+            printf("User already sign out!\n");
+            sleep(1);
+            system("clear");
+        }else if(li_ret == -1){
+            system("clear");
+            printf("User does not exists!\n");
+            sleep(1);
+            system("clear");
         }
         break;
     case '2':
@@ -26,8 +42,10 @@ int user_command(int sockfd, User *user){
         sendResponseCode(sockfd,responseCode);
         int su_ret = sign_up_command(sockfd,user);
         if(su_ret == 0){
+            system("clear");
             return 0;
         }else if(su_ret == 1){
+            system("clear");
             return 1;
         }
         break;
@@ -36,16 +54,21 @@ int user_command(int sockfd, User *user){
         sendResponseCode(sockfd,responseCode);
         int uso_ret = sign_out_command(sockfd,user);
         if(uso_ret == 0){
+            system("clear");
             return 0;
         }else if(uso_ret == 1){
+            system("clear");
             return 1;
         }
         break;
     case '4':
         printf("bey!\n");
         return -1;
-    default:    
+    default:
+        system("clear");    
         printf("Invalid command. Please try again.\n");
+        sleep(1);
+        system("clear"); 
         break;
     }
 }
@@ -61,12 +84,10 @@ int log_in_command(int sockfd, User *user){
     fgets(user->Passward,sizeof(user->Passward),stdin);
     recvResponseCode(sockfd,&Code);
     if(Code == USER_ERROR_OUT){
-        printf("User already sign out\n");
-        return 0;
+        return -1;
     }
     if(Code == USER_ERROR){
-        printf("User not exist\n");
-        return 0;
+        return -2;
     }
     recvTrain(sockfd,&train);
     memcpy(salt,train.data,train.length);
@@ -77,10 +98,8 @@ int log_in_command(int sockfd, User *user){
     memset(crypt_pw,0,sizeof(crypt_pw));
     recvResponseCode(sockfd,&Code);
     if(Code == SUCCESS){
-        printf("Log in successfully, Enjoy!\n");
         return 1;
     }else if(Code == PASSWARD_ERROR){
-        printf("Password error, please try again\n");
         return 0;
     }
 
