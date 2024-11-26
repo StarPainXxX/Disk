@@ -446,3 +446,157 @@ int rm_dir(char *path,User *user,MYSQL *mysql){
     }
 }
 
+int md5_find(const char *md5_str,MYSQL *mysql){
+    MYSQL_RES *res;
+    MYSQL_ROW row;
+    char query[MAX_SQL_LEN];
+    snprintf(query,MAX_SQL_LEN,
+            "select count(*) from file where md5 = '%s';",
+            md5_str);
+    if(mysql_query(mysql,query) != 0){
+        MY_LOG_ERROR("%s",mysql_errno(mysql));
+        return 1;
+    }
+    res = mysql_store_result(mysql);
+    if (res == NULL){
+        mysql_free_result(res);
+        MY_LOG_ERROR("mysql_store_result failed: %s\n",mysql_error(mysql));
+        return 1;
+    }
+    row = mysql_fetch_row(res);
+
+    int num = atoi(row[0]);
+    MY_LOG_INFO("%d",num);
+    if(num > 0 ){
+        mysql_free_result(res);
+        MY_LOG_ERROR("The file exist,file express");
+        return 1;
+    }
+    return num;
+}
+
+int get_file_size(off_t *size,const char *md5_str,MYSQL *mysql){
+    MYSQL_RES *res;
+    MYSQL_ROW row;
+    char query[MAX_SQL_LEN];
+    snprintf(query,MAX_SQL_LEN,
+            "select filesize from file where md5 = '%s';",
+            md5_str);
+    if(mysql_query(mysql,query) != 0){
+        MY_LOG_ERROR("%s",mysql_errno(mysql));
+        return 1;
+    }
+    res = mysql_store_result(mysql);
+    if (res == NULL){
+        mysql_free_result(res);
+        MY_LOG_ERROR("mysql_store_result failed: %s\n",mysql_error(mysql));
+        return 1;
+    }
+    row = mysql_fetch_row(res);
+
+    size = atoll(row[0]);
+    MY_LOG_DEBUG("%d",size);
+    return 0;
+}
+
+int create_file(int userId,PathStack *stack,char *name,off_t filesize,const char *md5_str,MYSQL *mysql){
+    MYSQL_RES *res;
+    MYSQL_ROW row;
+    char path[MAX_PATH_LEN] = {0};
+    char stack_path[256] = {0};
+    for(int i = 0; i <= stack->top;i++){
+        strcat(stack_path,stack->path[i]);
+    }
+    int parent_id = get_dir_id(stack_path,userId,mysql);
+    
+    MY_LOG_DEBUG("name = %s",name);
+    char query[MAX_SQL_LEN];
+    snprintf(query,MAX_SQL_LEN,
+            "select count(*) from file where owner_id = %d and parent_id = %d and filename = '%s' and type = %d",
+            userId,parent_id,name,1);
+     if(mysql_query(mysql,query) != 0){
+        MY_LOG_ERROR("%s\n",mysql_error(mysql));
+        return 1;
+    }
+
+    res = mysql_store_result(mysql);
+    if (res == NULL){
+        mysql_free_result(res);
+        MY_LOG_ERROR("mysql_store_result failed: %s\n",mysql_error(mysql));
+        return 1;
+    }
+    row = mysql_fetch_row(res);
+
+    int num = atoi(row[0]);
+    MY_LOG_INFO("%d",num);
+    if(num > 0 ){
+        mysql_free_result(res);
+        MY_LOG_ERROR("file already exists");
+        return 0;
+    }
+
+    strcat(path,stack_path);
+    strcat(path,"/");
+    strcat(path,name);
+    MY_LOG_DEBUG("%s",path);
+
+    snprintf(query,MAX_SQL_LEN,
+            "insert into file (parent_id,filename,owner_id,type,path,md5,filesize) values (%d,'%s',%d,%d,'%s','%s',%lld)",
+            parent_id,name,userId,1,path,md5_str,filesize);
+    if(mysql_query(mysql,query) != 0){
+        printf("%s\n",mysql_error(mysql));
+        return 1;
+    }
+
+    int file_id = mysql_insert_id(mysql);
+    if (file_id == 0) {
+        mysql_free_result(res);
+        MY_LOG_ERROR("Failed to retrieve the last inserted ID.\n");
+        return 1;
+    }
+
+    return file_id;
+
+}
+
+off_t get_size(int userId,PathStack *stack,char *name,MYSQL *mysql){
+    MYSQL_RES *res;
+    MYSQL_ROW row;
+    char path[MAX_PATH_LEN] = {0};
+    char stack_path[256] = {0};
+    off_t filesize;
+    for(int i = 0; i <= stack->top;i++){
+        strcat(stack_path,stack->path[i]);
+    }
+    int parent_id = get_dir_id(stack_path,userId,mysql);
+    
+    MY_LOG_DEBUG("name = %s",name);
+    char query[MAX_SQL_LEN];
+    snprintf(query,MAX_SQL_LEN,
+            "select filesize from file where owner_id = %d and parent_id = %d and filename = '%s' and type = %d",
+            userId,parent_id,name,1);
+     if(mysql_query(mysql,query) != 0){
+        MY_LOG_ERROR("%s\n",mysql_error(mysql));
+        return 1;
+    }
+
+    res = mysql_store_result(mysql);
+    if (res == NULL){
+        mysql_free_result(res);
+        MY_LOG_ERROR("mysql_store_result failed: %s\n",mysql_error(mysql));
+        return 1;
+    }
+    row = mysql_fetch_row(res);
+
+    
+    row = mysql_fetch_row(res);
+    if(row == NULL){
+        MY_LOG_INFO("The file not exist,ready to recv upload");
+        mysql_free_result(res);
+        filesize = 0;
+        return filesize;
+    }
+    filesize = atoll(row[0]);
+
+    return filesize;
+}

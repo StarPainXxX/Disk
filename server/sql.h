@@ -18,4 +18,8 @@ int get_dir_id(const char *path,int userId,MYSQL *mysql);
 int create_dir(int userId,PathStack *stack,char *name,int parent_id,MYSQL *mysql);
 int get_root_id(User *user,MYSQL *mysql);
 int rm_dir(char *path,User *user,MYSQL *mysql);
+int md5_find(const char *md5_str,MYSQL *mysql);
+int create_file(int userId,PathStack *stack,char *name,off_t filesize,const char *md5_str,MYSQL *mysql);
+int get_file_size(off_t *size,const char *md5_str,MYSQL *mysql);
+off_t get_size(int userId,PathStack *stack,char *name,MYSQL *mysql);
 #endif

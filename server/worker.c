@@ -529,6 +529,52 @@ int rmCommand(int netfd,User *user,char *args,MYSQL *mysql){
     MY_LOG_INFO("Rm successful");
 }
 
+int putCommand(int netfd,User *user,MYSQL *mysql){
+    train_t train;
+    int responseCode = SUCCESS;
+    char md5_str[MD5_LEN] = {0};
+    char filename[256] = {0};
+    recvn(netfd,&train.length,sizeof(train.length));
+    recvn(netfd,&train.data,train.length);
+    memcpy(md5_str,train.data,train.length);
+
+    int mf_ret = md5_find(md5_str,mysql);
+    if(mf_ret == 1){
+        responseCode = PATH_EXIST;
+        int sr_ret = sendResponseCode(netfd,responseCode);
+        ERROR_CHECK(sr_ret,-1,"send code error");
+        recvn(netfd,&train.length,sizeof(train.length));
+        recvn(netfd,&train.data,train.length);
+        memcpy(filename,train.data,train.length);
+        off_t filesize;
+        get_file_size(filesize,md5_str,mysql);
+        int cf_ret = create_file(user->UserId,&user->pathinfo.stack,filename,filesize,md5_str,mysql);
+        if(cf_ret == 0){
+            responseCode = PATH_ERROR;
+            sr_ret = sendResponseCode(netfd,responseCode);
+            ERROR_CHECK(sr_ret,-1,"send code error");
+        }
+        responseCode = SUCCESS;
+        sr_ret = sendResponseCode(netfd,responseCode);
+        ERROR_CHECK(sr_ret,-1,"send code error");
+        return 0;
+    }else{
+        responseCode = PATH_NOT_EXIST;
+        int sr_ret = sendResponseCode(netfd,responseCode);
+        ERROR_CHECK(sr_ret,-1,"send code error");
+        recvn(netfd,&train.length,sizeof(train.length));
+        recvn(netfd,&train.data,train.length);
+        memcpy(filename,train.data,train.length);
+        off_t filesize;
+        filesize = get_size(user->UserId,&user->pathinfo.stack,filename,mysql);
+        if(filesize == 0){
+            
+        }
+
+    }
+
+}
+
 int clientCommand(int netfd, User *user,MYSQL *mysql){
     train_t train;
     Command commands;

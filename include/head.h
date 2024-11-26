@@ -59,6 +59,11 @@
 
 #define ROOTPATH "Disk/"
 #define SALT_LEN 20
+
+#define READ_DATA_SIZE 4096
+#define MD5_SIZE 16
+#define MD5_LEN (MD5_SIZE * 2)
+
 typedef enum{
     cd,
     ls,

@@ -169,19 +169,41 @@ int cdCommand(int netfd,User *user,char *args,MYSQL *mysql){
 }
 
 
-int main(int argc, char *argv[]){
-    MYSQL *conn;
-    sql_connect(&conn);
-    User user;
-    user.UserId = 2;
-    char path[] = "/joel";
-    memcpy(user.pathinfo.curPath,path,sizeof(path));
-    printf("%s\n",user.pathinfo.curPath);
-    stackInit(&user.pathinfo.stack);
-    stackPush(&user.pathinfo.stack,user.UserName);
-    int netfd = 1;
-    char args[] = "cd dir1";
-    cdCommand(netfd,&user,args,conn);
+// int main(int argc, char *argv[]){
+//     MYSQL *conn;
+//     sql_connect(&conn);
+//     User user;
+//     user.UserId = 2;
+//     char path[] = "/joel";
+//     memcpy(user.pathinfo.curPath,path,sizeof(path));
+//     printf("%s\n",user.pathinfo.curPath);
+//     stackInit(&user.pathinfo.stack);
+//     stackPush(&user.pathinfo.stack,user.UserName);
+//     int netfd = 1;
+//     char args[] = "cd dir1";
+//     cdCommand(netfd,&user,args,conn);
 
     
+// }
+#include "md5.h"
+int main(int argc, char *argv[]){
+    MD5_CTX ctx;
+    MD5Init(&ctx);
+    int fd = open("main.c",O_RDWR);
+    char buf[4096] = {0};
+    while (1)
+    {
+        bzero(buf,4096);
+        ssize_t sret = read(fd,buf,4096);
+        if(sret == 0){
+            break;
+        }
+        MD5Update(&ctx,buf,sret);
+    }
+    unsigned char md[100] = {0};
+    MD5Final(md,&ctx);
+    for(int i = 0; i < 100; ++i){
+        printf("%02x",md[i]);
+    }
+    return 0;
 }

@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "worker.h": "c",
-        "ncurses.h": "c"
+        "ncurses.h": "c",
+        "head.h": "c"
     }
 }
