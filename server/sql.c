@@ -375,8 +375,8 @@ int get_dir_id(const char *path,int userId,MYSQL *mysql){
     
     char query[MAX_SQL_LEN];
     snprintf(query,MAX_SQL_LEN,
-            "select id from file where owner_id = %d and path = '%s' and type = %d;",
-            userId,path,0);
+            "select id from file where owner_id = %d and path = '%s';",
+            userId,path);
 
     if(mysql_query(mysql,query) != 0){
         MY_LOG_ERROR("%s\n",mysql_error(mysql));
@@ -400,46 +400,81 @@ int get_dir_id(const char *path,int userId,MYSQL *mysql){
     return atoi(row[0]);
 }
 
-int rm_dir(char *path,User *user,MYSQL *mysql){
-    int id = get_dir_id(path,user->UserId,mysql);
-    MY_LOG_DEBUG("id = %d",id);
-    MYSQL_RES *res;
+int rm_dir(char *path, User *user, MYSQL *mysql) {
+    int id = get_dir_id(path, user->UserId, mysql);
+    MY_LOG_DEBUG("id = %d", id);
+    
+    MYSQL_RES *res = NULL;
     MYSQL_ROW row;
+    char md5_str[MD5_LEN + 1] = {0};
     char query[MAX_SQL_LEN];
-    snprintf(query,MAX_SQL_LEN,
-            "select type from file where id = %d;",
-            id);
-    if(mysql_query(mysql,query) != 0){
-        MY_LOG_ERROR("%s\n",mysql_error(mysql));
+    snprintf(query, MAX_SQL_LEN, 
+             "SELECT type, md5 FROM file WHERE id = %d", id);
+    
+    if (mysql_query(mysql, query) != 0) {
+        MY_LOG_ERROR("Query error: %s", mysql_error(mysql));
         return 1;
     }
 
     res = mysql_store_result(mysql);
-    if(res == NULL){
-        MY_LOG_ERROR("mysql_store_resul failed: %s",mysql_errno(mysql));
+    if (res == NULL) {
+        MY_LOG_ERROR("Store result failed: %s", mysql_error(mysql));
         return 1;
     }
-    row = mysql_fetch_row(res);
-    int type = atoi(row[0]);
 
-    snprintf(query,MAX_SQL_LEN,
-            "delete from file where id = %d;",
-            id);
-    
-    MY_LOG_DEBUG("type = %d",type);
-    if(type == 1){
-        if(mysql_query(mysql,query) != 0){
-            MY_LOG_ERROR("%s\n",mysql_error(mysql));
+    row = mysql_fetch_row(res);
+    if (row == NULL) {
+        MY_LOG_ERROR("No row found");
+        mysql_free_result(res);
+        return 1;
+    }
+
+    int type = atoi(row[0]);
+    strncpy(md5_str, row[1], MD5_LEN);
+    mysql_free_result(res);
+
+    MY_LOG_DEBUG("type = %d", type);
+
+    if (type == 1) {
+        snprintf(query, MAX_SQL_LEN, 
+                 "SELECT COUNT(*) FROM file WHERE md5 = '%s'", md5_str);
+        
+        if (mysql_query(mysql, query) != 0) {
+            MY_LOG_ERROR("Query error: %s", mysql_error(mysql));
             return 1;
         }
+
+        res = mysql_store_result(mysql);
+        if (res == NULL) {
+            MY_LOG_ERROR("Store result failed: %s", mysql_error(mysql));
+            return 1;
+        }
+
+        row = mysql_fetch_row(res);
+        int num = atoi(row[0]);
+        mysql_free_result(res);
+
+        snprintf(query, MAX_SQL_LEN, "DELETE FROM file WHERE id = %d", id);
+        if (mysql_query(mysql, query) != 0) {
+            MY_LOG_ERROR("Delete error: %s", mysql_error(mysql));
+            return 1;
+        }
+        if (num < 2) {
+            if (unlink(md5_str) != 0) {
+                MY_LOG_ERROR("Failed to delete file: %s", md5_str);
+            }
+        }
+
         return 0;
-    }else{
-        int ld_ret = ls_dir(user,path,id,mysql);
-        if(ld_ret != 0){
+    } else { 
+        int ld_ret = ls_dir(user, path, id, mysql);
+        if (ld_ret != 0) {
             return -2;
         }
-        if(mysql_query(mysql,query) != 0){
-            MY_LOG_ERROR("%s\n",mysql_error(mysql));
+
+        snprintf(query, MAX_SQL_LEN, "DELETE FROM file WHERE id = %d", id);
+        if (mysql_query(mysql, query) != 0) {
+            MY_LOG_ERROR("Delete error: %s", mysql_error(mysql));
             return 1;
         }
         return 0;
@@ -450,6 +485,7 @@ int md5_find(const char *md5_str,MYSQL *mysql){
     MYSQL_RES *res;
     MYSQL_ROW row;
     char query[MAX_SQL_LEN];
+    MY_LOG_INFO("md5 = %s",md5_str);
     snprintf(query,MAX_SQL_LEN,
             "select count(*) from file where md5 = '%s';",
             md5_str);
@@ -469,7 +505,7 @@ int md5_find(const char *md5_str,MYSQL *mysql){
     MY_LOG_INFO("%d",num);
     if(num > 0 ){
         mysql_free_result(res);
-        MY_LOG_ERROR("The file exist,file express");
+        MY_LOG_INFO("The file exist,file express");
         return 1;
     }
     return num;
@@ -494,8 +530,8 @@ int get_file_size(off_t *size,const char *md5_str,MYSQL *mysql){
     }
     row = mysql_fetch_row(res);
 
-    size = atoll(row[0]);
-    MY_LOG_DEBUG("%d",size);
+    *size = atol(row[0]);
+    MY_LOG_DEBUG("%ld",size);
     return 0;
 }
 
@@ -512,8 +548,8 @@ int create_file(int userId,PathStack *stack,char *name,off_t filesize,const char
     MY_LOG_DEBUG("name = %s",name);
     char query[MAX_SQL_LEN];
     snprintf(query,MAX_SQL_LEN,
-            "select count(*) from file where owner_id = %d and parent_id = %d and filename = '%s' and type = %d",
-            userId,parent_id,name,1);
+            "select count(*) from file where owner_id = %d and parent_id = %d and md5 = '%s' and type = %d",
+            userId,parent_id,md5_str,1);
      if(mysql_query(mysql,query) != 0){
         MY_LOG_ERROR("%s\n",mysql_error(mysql));
         return 1;
@@ -540,9 +576,10 @@ int create_file(int userId,PathStack *stack,char *name,off_t filesize,const char
     strcat(path,name);
     MY_LOG_DEBUG("%s",path);
 
+    MY_LOG_DEBUG("%d,'%s',%d,%d,'%s','%s',%ld",parent_id,name,userId,1,path,md5_str,filesize);
     snprintf(query,MAX_SQL_LEN,
-            "insert into file (parent_id,filename,owner_id,type,path,md5,filesize) values (%d,'%s',%d,%d,'%s','%s',%lld)",
-            parent_id,name,userId,1,path,md5_str,filesize);
+            "insert into file (parent_id,filename,owner_id,type,path,md5,filesize) values (%d,'%s',%d,%d,'%s','%s',%ld)",
+            parent_id,md5_str,userId,1,path,md5_str,filesize);
     if(mysql_query(mysql,query) != 0){
         printf("%s\n",mysql_error(mysql));
         return 1;
@@ -568,14 +605,16 @@ off_t get_size(int userId,PathStack *stack,char *name,MYSQL *mysql){
     for(int i = 0; i <= stack->top;i++){
         strcat(stack_path,stack->path[i]);
     }
-    int parent_id = get_dir_id(stack_path,userId,mysql);
-    
+    strcat(path,stack_path);
+    strcat(path,"/");
+    strcat(path,name);
+
     MY_LOG_DEBUG("name = %s",name);
     char query[MAX_SQL_LEN];
     snprintf(query,MAX_SQL_LEN,
-            "select filesize from file where owner_id = %d and parent_id = %d and filename = '%s' and type = %d",
-            userId,parent_id,name,1);
-     if(mysql_query(mysql,query) != 0){
+            "select filesize from file where owner_id = %d and path = '%s' and type = %d",
+            userId,path,1);
+    if(mysql_query(mysql,query) != 0){
         MY_LOG_ERROR("%s\n",mysql_error(mysql));
         return 1;
     }
@@ -587,16 +626,55 @@ off_t get_size(int userId,PathStack *stack,char *name,MYSQL *mysql){
         return 1;
     }
     row = mysql_fetch_row(res);
-
-    
-    row = mysql_fetch_row(res);
     if(row == NULL){
         MY_LOG_INFO("The file not exist,ready to recv upload");
         mysql_free_result(res);
         filesize = 0;
         return filesize;
     }
-    filesize = atoll(row[0]);
+    filesize = atol(row[0]);
 
     return filesize;
+}
+
+int update_file(int userId,const char *name,off_t filesize,const char *md5_str,PathStack stack,MYSQL *mysql){
+    MYSQL_RES *res;
+    MYSQL_ROW row;
+    char path[MAX_PATH_LEN] = {0};
+    char stack_path[256] = {0};
+    for(int i = 0; i <= stack.top;i++){
+        strcat(stack_path,stack.path[i]);
+    }
+    int parent_id = get_dir_id(stack_path,userId,mysql);
+    strcat(path,stack_path);
+    strcat(path,"/");
+    strcat(path,name);
+    
+    MY_LOG_DEBUG("name = %s",name);
+    char query[MAX_SQL_LEN];
+    snprintf(query,MAX_SQL_LEN,
+            "select id from file where owner_id = %d and parent_id = %d and path = '%s' and type = %d",
+            userId,parent_id,path,1);
+    if(mysql_query(mysql,query) != 0){
+        MY_LOG_ERROR("%s\n",mysql_error(mysql));
+        return 1;
+    }
+    res = mysql_store_result(mysql);
+    if (res == NULL){
+        mysql_free_result(res);
+        MY_LOG_ERROR("mysql_store_result failed: %s\n",mysql_error(mysql));
+        return 1;
+    }
+    row = mysql_fetch_row(res);
+
+    int id = atoi(row[0]);
+
+    snprintf(query,MAX_SQL_LEN,
+            "update file set filesize = %ld,md5 = '%s' where id = %d",
+            filesize,md5_str,id);
+    if(mysql_query(mysql,query) != 0){
+        MY_LOG_ERROR("%s\n",mysql_error(mysql));
+        return 1;
+    }
+    return 0;
 }

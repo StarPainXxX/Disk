@@ -29,6 +29,7 @@ int main(int argc, char *argv[]) {
             return 0;
         }
     }
+    chdir("Disk");
     while(1) {
         int fc_ret = fileCommand(sockfd);
         if(fc_ret == -1){

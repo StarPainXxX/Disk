@@ -2,6 +2,8 @@
     "files.associations": {
         "worker.h": "c",
         "ncurses.h": "c",
-        "head.h": "c"
+        "head.h": "c",
+        "typeinfo": "c",
+        "initializer_list": "c"
     }
 }

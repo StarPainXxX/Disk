@@ -40,6 +40,7 @@ void *threadFunc(void *arg){
         pathInit(&user,mysql);
         stackInit(&user.pathinfo.stack);
         stackPush(&user.pathinfo.stack,user.pathinfo.rootPath);
+        chdir("Disk");
         while(1){
             int cc_ret = clientCommand(netfd,&user,mysql);
             if(cc_ret == -1){
@@ -532,8 +533,9 @@ int rmCommand(int netfd,User *user,char *args,MYSQL *mysql){
 int putCommand(int netfd,User *user,MYSQL *mysql){
     train_t train;
     int responseCode = SUCCESS;
-    char md5_str[MD5_LEN] = {0};
+    char md5_str[MD5_LEN + 1];
     char filename[256] = {0};
+    char *buffer = NULL;
     recvn(netfd,&train.length,sizeof(train.length));
     recvn(netfd,&train.data,train.length);
     memcpy(md5_str,train.data,train.length);
@@ -547,7 +549,7 @@ int putCommand(int netfd,User *user,MYSQL *mysql){
         recvn(netfd,&train.data,train.length);
         memcpy(filename,train.data,train.length);
         off_t filesize;
-        get_file_size(filesize,md5_str,mysql);
+        get_file_size(&filesize,md5_str,mysql);
         int cf_ret = create_file(user->UserId,&user->pathinfo.stack,filename,filesize,md5_str,mysql);
         if(cf_ret == 0){
             responseCode = PATH_ERROR;
@@ -557,8 +559,10 @@ int putCommand(int netfd,User *user,MYSQL *mysql){
         responseCode = SUCCESS;
         sr_ret = sendResponseCode(netfd,responseCode);
         ERROR_CHECK(sr_ret,-1,"send code error");
+        printf("Put successful!\n");
         return 0;
     }else{
+        //没有找到相同的md5,普通上传
         responseCode = PATH_NOT_EXIST;
         int sr_ret = sendResponseCode(netfd,responseCode);
         ERROR_CHECK(sr_ret,-1,"send code error");
@@ -568,11 +572,84 @@ int putCommand(int netfd,User *user,MYSQL *mysql){
         off_t filesize;
         filesize = get_size(user->UserId,&user->pathinfo.stack,filename,mysql);
         if(filesize == 0){
-            
+            //没有发现相同的文件名
+            responseCode = PATH_NOT_EXIST;
+            sr_ret = sendResponseCode(netfd,responseCode);
+            ERROR_CHECK(sr_ret,-1,"send code error");
+            int cf_ret = create_file(user->UserId,&user->pathinfo.stack,filename,filesize,md5_str,mysql);
+            recvn(netfd,&train.length,sizeof(train.length));
+            recvn(netfd,train.data,train.length);
+            memcpy(&filesize,train.data,train.length);
+            MY_LOG_INFO("Receiving file: %s",filename);
+            MY_LOG_INFO("File size: %.2f MB\n", (double)filesize / (1024 * 1024));
+            int fd = open(md5_str,O_CREAT|O_RDWR|O_TRUNC,0666);
+            MY_LOG_ERROR("%d",filesize);
+            buffer = malloc(filesize);
+            if(recvn(netfd,buffer,filesize) == -1){
+                responseCode = PATH_ERROR;
+                sendResponseCode(netfd,responseCode);
+                MY_LOG_INFO("Put Fail!\n");
+                return 0;
+            }
+            write(fd, buffer, filesize);
+            // if(r_ret == -1){
+            //     filesize = r_ret;
+            //     free(buffer);
+            //     close(fd);
+            //     update_file(user->UserId,filename,filesize,md5_str,user->pathinfo.stack,mysql);
+            //     return -1;
+            // }
+            update_file(user->UserId,filename,filesize,md5_str,user->pathinfo.stack,mysql);
+            free(buffer);
+            close(fd);
+        }else{
+            responseCode = PATH_EXIST;
+            sr_ret = sendResponseCode(netfd,responseCode);
+            ERROR_CHECK(sr_ret,-1,"send code error");
+            int fd = open(md5_str,O_RDWR);
+            struct stat st;
+            fstat(fd,&st);
+            train.length = sizeof(off_t);
+            memcpy(train.data,&st.st_size,train.length);
+            send(netfd,&train,sizeof(train.length) + train.length,MSG_NOSIGNAL);
+            recvResponseCode(netfd,&responseCode);
+            if(responseCode == PATH_EXIST){
+                MY_LOG_INFO("The file already exists!");
+                close(fd);
+                return 0;
+            }else{
+                MY_LOG_INFO("The file is incompelete. Prepare to accept the remaining file contents");
+                off_t size;
+                recvn(netfd,&train.length,sizeof(train.length));
+                recvn(netfd,train.data,train.length);
+                memcpy(&size,train.data,train.length);
+                MY_LOG_INFO("Receiving file: %s",filename);
+                MY_LOG_INFO("File size: %.2f MB\n", (double)size / (1024 * 1024));
+                lseek(fd,0,SEEK_END);
+                buffer = malloc(size);
+                off_t r_ret = recv(netfd,buffer,size,0);
+                write(fd, buffer, r_ret);
+                if(r_ret != size){
+                    size = r_ret;
+                    free(buffer);
+                    close(fd);
+                    update_file(user->UserId,filename,size + filesize,md5_str,user->pathinfo.stack,mysql);
+                    return -1;
+                }
+                if(update_file(user->UserId,filename,size + filesize,md5_str,user->pathinfo.stack,mysql) != 0){
+                    MY_LOG_ERROR("Update file fail");
+                }
+                update_file(user->UserId,filename,filesize,md5_str,user->pathinfo.stack,mysql);
+            }
+            free(buffer);
+            close(fd);
         }
 
     }
-
+    responseCode = SUCCESS;
+    sendResponseCode(netfd,responseCode);
+    MY_LOG_INFO("Put successful!\n");
+    return 0;
 }
 
 int clientCommand(int netfd, User *user,MYSQL *mysql){
@@ -617,7 +694,7 @@ int clientCommand(int netfd, User *user,MYSQL *mysql){
             break;
         case put:
             MY_LOG_INFO("Executing PUT command, User: %d",user->UserId);
-            if( mkCommand(netfd,user,commands.args,mysql) == -1){
+            if( putCommand(netfd,user,mysql) == -1){
                 MY_LOG_ERROR("Client %s disconnection!\n",user->UserId);
                 return -1;
             }
@@ -650,5 +727,4 @@ int clientCommand(int netfd, User *user,MYSQL *mysql){
             break;
     }
     return 1;
-     
 }

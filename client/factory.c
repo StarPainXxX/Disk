@@ -341,6 +341,7 @@ void serialize(char *data[], size_t count, char **buffer, size_t *total_size){
 int transFile(int netfd, const char *path) {
     int responseCode = SUCCESS;
     train_t train;
+    const off_t LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
     char md5_str[MD5_LEN] = {0};
     int cfm_ret = Compute_file_md5(path,md5_str);
     if(cfm_ret == 0){
@@ -351,7 +352,7 @@ int transFile(int netfd, const char *path) {
     memcpy(train.data,md5_str,train.length);
     send(netfd,&train,sizeof(train.length)+train.length,0);
     
-    recvResponseCode(netfd,responseCode);
+    recvResponseCode(netfd,&responseCode);
     if(responseCode == PATH_EXIST){
         train.length = strlen(path);
         memcpy(train.data,path,train.length);
@@ -362,158 +363,93 @@ int transFile(int netfd, const char *path) {
             return 0;
         }else{
             printf("Upload file successful!\n");
+            return 0;
         }
     }else{
         train.length = strlen(path);
         memcpy(train.data,path,train.length);
         send(netfd,&train,sizeof(train.length)+train.length,0);
-
-    }
-
-    char filePath[4096] = {0};
-    
-    strncpy(filePath, path, sizeof(filePath) - 1);
-    
-    struct stat statbuf;
-    int fd = open(filePath, O_RDWR);
-    if (fd == -1) {
-        perror("File open error");
-        return -1;
-    }
-    // 获取文件信息
-    if (fstat(fd, &statbuf) == -1) {
-        perror("fstat error");
-        close(fd);
-        return -1;
-    }
-    // 获取文件名
-    char *filename = basename(filePath);    
-    // 发送文件名
-    train.length = strlen(filename);
-    printf("filename %s\n",filename);
-    memcpy(train.data, filename, train.length);
-    if (send(netfd, &train, sizeof(train.length) + train.length, MSG_NOSIGNAL) == -1) {
-        perror("send filename failed");
-        close(fd);
-        return -1;
-    }
-    // 接收响应码
-    if (recvResponseCode(netfd, &responseCode) == -1) {
-        perror("recv response code failed");
-        close(fd);
-        return -1;
-    }
-    // 定义大文件阈值 100M
-    const off_t LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;  // 100MB
-    if (responseCode == PATH_EXIST) {
-        // 接收已传输的文件大小
-        off_t st_size = 0;
-        if(recv(netfd,&train.length,sizeof(train.length),0) == -1){
-            close(fd);
-            return -1;
-        }
-        if(recv(netfd,&train.data,train.length,0) == -1){
-            close(fd);
-            return -1;
-        }
-        
-        memcpy(&st_size, train.data, sizeof(off_t));
-        // 检查是否需要续传
-        if (st_size == statbuf.st_size) {
-            responseCode = PATH_ERROR;
-            sendResponseCode(netfd,responseCode);
-            printf("Upload lose! Path is exist!\n");
-            close(fd);
-            return -1;
-        }
-        // 从断点处继续传输
-        if (lseek(fd, st_size, SEEK_SET) == -1) {
-            perror("lseek failed");
-            close(fd);
-            return -1;
-        }
-        memset(&train,0,sizeof(train));
-        // 发送剩余文件大小
-        train.length = sizeof(off_t);
-        off_t s_size = statbuf.st_size - st_size;
-        printf("%ld\n",s_size);
-        char buffer[sizeof(off_t)];
-        memcpy(train.data, &s_size, sizeof(off_t));
-        printf("trainlenth = %s\n",train.data);
-        if (send(netfd,&train,sizeof(train.length)+train.length,MSG_NOSIGNAL) == -1) {
-            perror("send file size failed");
-            close(fd);
-            return -1;
-        }
-        
-        // 大文件使用 mmap
-        if (statbuf.st_size > LARGE_FILE_THRESHOLD) {
-            void *mapped = mmap(NULL, statbuf.st_size, PROT_READ, MAP_SHARED, fd, 0);
-            if (mapped == MAP_FAILED) {
-                perror("mmap failed");
-                close(fd);
-                return -1;
+        recvResponseCode(netfd,&responseCode);
+        if(responseCode == PATH_NOT_EXIST){
+            int fd = open(path,O_RDWR);
+            struct stat st;
+            fstat(fd,&st);
+            train.length = sizeof(off_t);
+            memcpy(train.data,&st.st_size,train.length);
+            send(netfd,&train,sizeof(train.length)+train.length,0);
+            if(st.st_size >= LARGE_FILE_THRESHOLD){
+                void *mapped = mmap(NULL,st.st_size,PROT_READ,MAP_SHARED,fd,0);
+                if(mapped == MAP_FAILED){
+                    printf("mmap failed\n");
+                    close(fd);
+                    return 1;
+                }
+                ssize_t sret = send(netfd,mapped,st.st_size,MSG_NOSIGNAL);
+                if(sret == -1){
+                    printf("send mmap content failed\n");
+                    munmap(mapped,st.st_size);
+                    close(fd);
+                    return 1;
+                }
+                munmap(mapped,st.st_size);
+            }else{
+                if(sendfile(netfd,fd,NULL,st.st_size) == -1){
+                    printf("Upload file fail\n");
+                    close(fd);
+                    return 1;
+                }
             }
-            
-            // 发送剩余文件内容
-            ssize_t sent = send(netfd, (char*)mapped + st_size, statbuf.st_size - st_size, MSG_NOSIGNAL);
-            if (sent == -1) {
-                perror("send mmap content failed");
-                munmap(mapped, statbuf.st_size);
-                close(fd);
-                return -1;
-            }
-            // 取消内存映射
-            munmap(mapped, statbuf.st_size);
-        } else {
-            // 小文件使用 sendfile
-            if (sendfile(netfd, fd, NULL, statbuf.st_size - st_size) == -1) {
-                perror("sendfile failed");
-                close(fd);
-                return -1;
-            }
-        }
-    } else if(responseCode == PATH_ERROR){
-        printf("It's a directory Can't trans\n");
-        return -1;
-    }else if(responseCode == PATH_NOT_EXIST){
-        // 发送总文件大小
-        train.length = sizeof(off_t);
-        memcpy(train.data, &statbuf.st_size, train.length);
-        if (send(netfd, &train, sizeof(train.length) + train.length, MSG_NOSIGNAL) == -1) {
-            perror("send file size failed");
             close(fd);
-            return -1;
-        }
-        // 大文件使用 mmap
-        if (statbuf.st_size > LARGE_FILE_THRESHOLD) {
-            void *mapped = mmap(NULL, statbuf.st_size, PROT_READ, MAP_SHARED, fd, 0);
-            if (mapped == MAP_FAILED) {
-                perror("mmap failed");
-                close(fd);
-                return -1;
+        }else if(responseCode == PATH_EXIST){
+            int fd = open(path,O_RDWR);
+            struct stat st;
+            fstat(fd,&st);
+            off_t filesize;
+            recvn(netfd,&train.length,sizeof(train.length));
+            recvn(netfd,train.data,train.length);
+            memcpy(&filesize,train.data,train.length);
+            if(filesize == st.st_size){
+                responseCode = PATH_EXIST;
+                sendResponseCode(netfd,responseCode);
+            }else{
+                responseCode = PATH_NOT_EXIST;
+                sendResponseCode(netfd,responseCode);
+                off_t st_size = st.st_size - filesize;
+                train.length = sizeof(off_t);
+                memcpy(train.data,&st_size,train.length);
+                send(netfd,&train,sizeof(train.length)+train.length,MSG_NOSIGNAL);
+                if(st_size > LARGE_FILE_THRESHOLD){
+                    lseek(fd,filesize,SEEK_SET);
+                    void *mapped = mmap(NULL,st_size,PROT_READ,MAP_SHARED,fd,filesize);
+                    if(mapped == MAP_FAILED){
+                        printf("mmap failed for remaining content\n");
+                        close(fd);
+                        return 1;
+                    }
+                    ssize_t sent = send(netfd, mapped, st_size,MSG_NOSIGNAL);
+                    if(sent == -1){
+                        printf("send reamining mmap content failed\n");
+                        munmap(mapped, st_size);
+                        close(fd);
+                        return -1;
+                    }
+                    munmap(mapped, st_size);
+                }else{
+                    off_t offset = filesize;
+                    if(sendfile(netfd,fd,&offset,st_size) == -1){
+                        printf("send remaining content failed\n");
+                        close(fd);
+                        return -1;
+                    }
+                }
             }
-            // 发送整个文件内容
-            ssize_t sent = send(netfd, mapped, statbuf.st_size, MSG_NOSIGNAL);
-            if (sent == -1) {
-                perror("send mmap content failed");
-                munmap(mapped, statbuf.st_size);
-                close(fd);
-                return -1;
-            }
-            // 取消内存映射
-            munmap(mapped, statbuf.st_size);
-        } else {
-            // 小文件使用 sendfile
-            if (sendfile(netfd, fd, NULL, statbuf.st_size) == -1) {
-                perror("sendfile failed");
-                close(fd);
-                return -1;
-            }
+            close(fd);
         }
     }
-    close(fd);
-    printf("File transfer Done!\n");
+    recvResponseCode(netfd,&responseCode);
+    if(responseCode == SUCCESS){
+        printf("Successfully upload file\n");
+    }
     return 0;
 }
 

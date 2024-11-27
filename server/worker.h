@@ -22,6 +22,7 @@ int lsCommand(int netfd,User *user,MYSQL *mysql);
 int pwdCommand(int netfd,User *user);
 int mkCommand(int netfd,User *user,char *args,MYSQL *mysql);
 int rmCommand(int netfd,User *user,char *args,MYSQL *mysql);
+int putCommand(int netfd,User *user,MYSQL *mysql);
 
 
 

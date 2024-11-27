@@ -1,6 +1,7 @@
 #ifndef __TCP__
 #define __TCP__
 #include "../include/head.h"
+#include "worker.h"
 
 
 typedef struct node_s{
