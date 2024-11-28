@@ -18,10 +18,8 @@ int transFile(int netfd,const char *path);
 void updateProgress(off_t current, off_t total);
 int recvn(int sockfd, void *buf, long total);
 int recvWithProgress(int sockfd, char *buf, long total);
-int recvFile(int sockfd);
+int recvFile(int sockfd,const char *path);
 int Compute_file_md5(const char *file_path, char *md5_str);
 int put_command(int netfd,char *args);
-
-
-
+int get_command(int netfd,char *args);
 #endif

@@ -244,22 +244,20 @@ int recvWithProgress(int sockfd, char *buf, long total) {
     return 0;
 }
 
-int recvFile(int sockfd) {
+int recvFile(int sockfd,const char *path) {
 
     char filename[4096] = {0};
     int responseCode = SUCCESS;
     train_t train;
     char *buffer = NULL;
+    sendTrain(sockfd,path,strlen(path));
     recvResponseCode(sockfd,&responseCode);
-    if(responseCode == PATH_ERROR){
+    if(responseCode == PATH_NOT_EXIST){
         printf("The file does not exist!\n");\
         return 0;
     }
-    
-    recvn(sockfd,&train.length,sizeof(train.length));
-    recvn(sockfd,&train.data,train.length);
-    memcpy(filename,train.data,train.length);
-    int fd = open(filename,O_RDWR);
+
+    int fd = open(path,O_RDWR);
     if(fd == -1){
         responseCode = PATH_NOT_EXIST;
         sendResponseCode(sockfd,responseCode);
@@ -267,9 +265,9 @@ int recvFile(int sockfd) {
         recvn(sockfd,&train.length,sizeof(train.length));
         recvn(sockfd,train.data,train.length);
         memcpy(&filesize,train.data,train.length);
-        printf("Receiving file: %s\n", filename);
+        printf("Receiving file: %s\n", path);
         printf("File size: %.2f MB\n", (double)filesize / (1024 * 1024));
-        fd = open(filename,O_CREAT|O_RDWR|O_TRUNC,0666);
+        fd = open(path,O_CREAT|O_RDWR|O_TRUNC,0666);
         buffer = malloc(filesize);
         recvWithProgress(sockfd,buffer,filesize);
         if(write(fd, buffer, filesize) != filesize){
@@ -284,6 +282,7 @@ int recvFile(int sockfd) {
         responseCode = PATH_EXIST;
         sendResponseCode(sockfd,responseCode);
         struct stat st;
+        fstat(fd,&st);
         train.length = sizeof(off_t);
         memcpy(train.data,&st.st_size,train.length);
         send(sockfd,&train,sizeof(train.length)+train.length,MSG_NOSIGNAL);
@@ -534,3 +533,32 @@ int put_command(int netfd,char *args){
     return 0;
 }
 
+int get_command(int netfd,char *args){
+    char path[256] = {0};
+    char cmdCopy[256] = {0};
+    if (strlen(args) >= sizeof(cmdCopy)) {
+        return -1;
+    }
+    strcpy(cmdCopy, args);
+    char *cmd = strtok(cmdCopy, " /");
+    cmd = strtok(NULL, " /");
+    if (!cmd) {
+        strcpy(path, "./");
+    } else {
+        while (cmd != NULL) {
+            if (strlen(path) + strlen(cmd) + 2 >= MAX_PATH_LEN) {
+                return -1; 
+            }
+            strcat(path, cmd);
+            cmd = strtok(NULL, " /");
+            if(cmd != NULL){
+            strcat(path, "/");
+            }
+        }
+    }
+    printf("path = %s\n",path);
+    if(recvFile(netfd,path) == -1){
+        return -1;
+    }
+    return 0;
+}

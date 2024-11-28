@@ -676,5 +676,34 @@ int update_file(int userId,const char *name,off_t filesize,const char *md5_str,P
         MY_LOG_ERROR("%s\n",mysql_error(mysql));
         return 1;
     }
+    mysql_free_result(res);
     return 0;
+}
+
+char* find_file(int userId,const char *path,MYSQL *mysql){
+    MYSQL_RES *res;
+    MYSQL_ROW row;
+    char query[MAX_SQL_LEN] = {0};
+
+    snprintf(query,MAX_SQL_LEN,
+            "select md5 from file where path = '%s'",
+            path);
+
+    if(mysql_query(mysql,query) != 0){
+        MY_LOG_ERROR("%s",mysql_error(mysql));
+        return NULL;
+    }
+    res = mysql_store_result(mysql);
+    if(res == NULL){
+        mysql_free_result(res);
+        MY_LOG_ERROR("mysql_store_result failed: %s",mysql_error(mysql));
+        return NULL;
+    }
+    row = mysql_fetch_row(res);
+    if(row == NULL){
+        return NULL;
+    }
+    mysql_free_result(res);
+    
+    return row[0];
 }

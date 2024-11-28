@@ -23,4 +23,5 @@ int create_file(int userId,PathStack *stack,char *name,off_t filesize,const char
 int get_file_size(off_t *size,const char *md5_str,MYSQL *mysql);
 off_t get_size(int userId,PathStack *stack,char *name,MYSQL *mysql);
 int update_file(int userId,const char *name,off_t filesize,const char *md5_str,PathStack stack,MYSQL *mysql);
+char* find_file(int userId,const char *path,MYSQL *mysql);
 #endif

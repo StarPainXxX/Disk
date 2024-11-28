@@ -652,6 +652,107 @@ int putCommand(int netfd,User *user,MYSQL *mysql){
     return 0;
 }
 
+int getCommand(int netfd,User *user,MYSQL *mysql){
+    int responseCode = SUCCESS;
+    char filename[MAX_PATH_LEN] = {0};
+    char path[MAX_PATH_LEN] = {0};
+    const off_t LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
+    train_t train;
+    char *buffer = NULL;
+    char md5_str[MD5_LEN + 1];
+    recvn(netfd,&train.length,sizeof(train.length));
+    recvn(netfd,&train.data,train.length);
+    memcpy(filename,&train.data,train.length);
+    for(int i = 0; i <= user->pathinfo.stack.top;i++){
+        strcat(path,user->pathinfo.stack.path[i]);
+    }
+    strcat(path,"/");
+    strcat(path,filename);
+    memcpy(md5_str,find_file(user->UserId,path,mysql),MD5_LEN + 1);
+    if( md5_str == NULL){
+        responseCode = PATH_NOT_EXIST;
+        int sr_ret = sendResponseCode(netfd,responseCode);
+        ERROR_CHECK(sr_ret,-1,"Send code fail");
+    }
+    MY_LOG_DEBUG("md5 = %s",md5_str);
+    responseCode = PATH_EXIST;
+    int sr_ret = sendResponseCode(netfd,responseCode);
+    ERROR_CHECK(sr_ret,-1,"Send code fail");
+    
+    recvResponseCode(netfd,&responseCode);
+    int fd = open(md5_str,O_RDWR);
+    struct stat st;
+    fstat(fd,&st);
+    
+    if(responseCode == PATH_NOT_EXIST){    
+        train.length = sizeof(off_t);
+        memcpy(train.data,&st.st_size,train.length);
+        send(netfd,&train,train.length + sizeof(train.length),MSG_NOSIGNAL);
+        MY_LOG_DEBUG("size = %d",st.st_size);
+        if(st.st_size >= LARGE_FILE_THRESHOLD){
+            void *mapped = mmap(NULL,st.st_size,PROT_READ,MAP_SHARED,fd,0);
+            if(mapped == MAP_FAILED){
+                MY_LOG_ERROR("mmap failed");
+                close(fd);
+                return 1;
+            }
+            send(netfd,mapped,st.st_size,MSG_NOSIGNAL);
+            munmap(mapped,st.st_size);
+        }else{
+            if(sendfile(netfd,fd,NULL,st.st_size) == -1){
+                MY_LOG_ERROR("Download fail,client is diconnection");
+                close(fd);
+                return -1;
+            }
+        }
+    }else{
+        off_t filesize;
+        recvn(netfd,&train.length,sizeof(train.length));
+        recvn(netfd,train.data,train.length);
+        memcpy(&filesize,train.data,train.length);
+        MY_LOG_ERROR("%d",filesize);
+        if(filesize == st.st_size){
+            responseCode = PATH_EXIST;
+            sr_ret = sendResponseCode(netfd,responseCode);
+            ERROR_CHECK(sr_ret,-1,"Send code fail");
+            return 0;
+        }else{
+            responseCode = PATH_NOT_EXIST;
+            sr_ret = sendResponseCode(netfd,responseCode);
+            ERROR_CHECK(sr_ret,-1,"Send code fail");
+            off_t re_size = st.st_size - filesize;
+            train.length = sizeof(off_t);
+            memcpy(train.data,&re_size,train.length);
+            send(netfd,&train,sizeof(train.length)+train.length,MSG_NOSIGNAL);
+            if(re_size > LARGE_FILE_THRESHOLD){
+                lseek(fd,filesize,SEEK_SET);
+                void *mapped = mmap(NULL,re_size,PROT_READ,MAP_SHARED,fd,filesize);
+                if(mapped == MAP_FAILED){
+                    MY_LOG_ERROR("mmap failed for remaining content");
+                    close(fd);
+                    return 1;
+                }
+                send(netfd,mapped,st.st_size,MSG_NOSIGNAL);
+                munmap(mapped,re_size);
+            }else{
+                off_t offset = filesize;
+                if(sendfile(netfd, fd,&offset,re_size) == -1){
+                    MY_LOG_ERROR("Send remaining content failed");
+                    close(fd);
+                    return -1;
+                }
+            }
+        }
+    }
+    
+    recvResponseCode(netfd,&responseCode);
+    if(responseCode == SUCCESS){
+        MY_LOG_INFO("Client download successful");
+    }
+    close(fd);
+    return 0;
+}
+
 int clientCommand(int netfd, User *user,MYSQL *mysql){
     train_t train;
     Command commands;
@@ -701,7 +802,7 @@ int clientCommand(int netfd, User *user,MYSQL *mysql){
             break;
         case get:
             MY_LOG_INFO("Executing GET command, User: %d",user->UserId);
-            if(-1){
+            if( getCommand(netfd,user,mysql) == -1){
                 MY_LOG_ERROR("Client %s disconnection!\n",user->UserId);
                 return -1;
             }

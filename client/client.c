@@ -67,6 +67,9 @@ int fileCommand(int sockfd){
     case put:
         put_command(sockfd,commands.args);
         break;
+    case get:
+        get_command(sockfd,commands.args);
+        break;
     case -1:
         printf("Invalid command!\n");
         break;
